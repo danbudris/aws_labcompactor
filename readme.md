@@ -1,5 +1,5 @@
-# AWS Trash Compactor
-A tool for creating and recycling disposable VPCs in AWS, using Terraform, Lambda and CloudWatch.
+# AWS Lab Trash Compactor
+A tool for creating and recycling disposable VPCs in AWS using Terraform, Python and Docker on ECS FarGate.
 
 ## Getting Started
 This tool requires the Terraform state to be stored in an S3 bucket.  Create an S3 bucket, and configure the Terraform (./backend.tf) with the path of your state file, as well as the name and region of the S3 Bucket.  
