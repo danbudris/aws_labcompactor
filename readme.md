@@ -11,7 +11,7 @@ Configure the Provider file (./provider.tf), so that Terraform has access to an 
 Terraform
 Python 3+
 AWS CLI
-AWS IAM Role or User with VPC, EC2, S3, Lambda and Cloudwatch priilleges.  
+AWS IAM Role or User with VPC and EC2 access
 
 ### Installing
 
