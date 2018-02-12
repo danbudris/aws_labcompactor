@@ -2,12 +2,8 @@ import boto3
 from subprocess import call
 import os
 import re
-
-# Set the tag key/pair value of the resources to be compacted
-tag = "Compact"
-value = "True"
-ec2 = boto3.resource('ec2')
-compact_filter = [{'Name':'tag:{}'.format(tag),'Values':['{}'.format(value)]}]
+import argparse
+import yaml
 
 class resource_import_group:
     """Given a list of resources, and a Terraform resource type, this class can be used to import the resources and destroy them"""
@@ -32,7 +28,7 @@ class resource_import_group:
         with open(self.path,'w+') as template_file:
             for resource in self.resource_templates:
                 template_file.write('{}\n'.format(resource))
- 
+
     # import each resource from the resource list into terraform state, and bind it to a template
     def terraform_import(self):
         if (self.resource_type == "aws_lambda_function"):
@@ -63,28 +59,25 @@ class resource_import_group:
         self.delete_self()
 
 # Functions to obtain Lambda ARNs and tags
-# Set up the low-level client connection to lambda
-awslambda = boto3.client('lambda')
-
-def get_lambda_tags(func_arn):
+def get_lambda_tags(func_arn, connection):
     """Get the tags of a lambda, given the ARN of a function"""
-    response = awslambda.list_tags(
+    response = connection.list_tags(
         Resource=func_arn
     )
     return response['Tags']
 
-def get_all_lambda_tags():
+def get_all_lambda_tags(connection):
     """Get all lambdas and their tags as a list of dictionaries"""
-    functions = awslambda.list_functions()
+    functions = connection.list_functions()
     function_arns = [i['FunctionArn'] for i in functions['Functions']]
     function_names = [i['FunctionName'] for i in functions['Functions']]
-    function_tags = [{i: get_lambda_tags(i)} for i in function_arns]
+    function_tags = [{i: get_lambda_tags(i, connection)} for i in function_arns]
     return function_tags
 
 
-def get_lambda_tags_by_key(search_key, search_value):
+def get_lambda_tags_by_key(search_key, search_value, connection):
     """Given a tag key and value returns a dictionary of matches and misses"""
-    function_tags = get_all_lambda_tags()
+    function_tags = get_all_lambda_tags(connection)
     matches = []
     misses = []
     arn_seperator = r"function:(.+)"
@@ -98,22 +91,45 @@ def get_lambda_tags_by_key(search_key, search_value):
                 pass
     return {'matches': matches, 'misses':misses}
 
+def main(aws_profile, aws_region, tag_key, tag_value):
+    """Function to delete all VPC, Subnet, Ec2 Instance and Lambda resources with the given key/pair"""
+    # Set up the session with the region and profile parameters
+    session = boto3.session.Session(region_name="{}".format(aws_region), profile_name="{}".format(aws_profile))
+    # Set up the resource level connection to EC2
+    ec2 = session.resource('ec2')
+    # Set up the low-level client connection to lambda
+    # This will be passed to the lamabda search functions
+    awslambda = session.client('lambda')
 
-def main():
+    # Set the tag key/pair value of the resources to be compacted
+    tag = tag_key
+    value = tag_value
+    compact_filter = [{'Name': 'tag:{}'.format(tag), 'Values': ['{}'.format(value)]}]
+
+    # Compact VPCS
     vpcs = resource_import_group(list(ec2.vpcs.filter(Filters=compact_filter)), "aws_vpc")
     vpcs.compact()
-    
+
+    # Compact Subnets
     subnets = resource_import_group(list(ec2.subnets.filter(Filters=compact_filter)), "aws_subnet")
     subnets.compact()
-    
+
+    # Compact Instances
     instances = resource_import_group(list(ec2.instances.filter(Filters=compact_filter)), "aws_instance")
     instances.compact()
 
-    lambdas = resource_import_group((get_lambda_tags_by_key('Compact','True')['matches']),"aws_lambda_function")
+    # Compact Lambdas
+    lambdas = resource_import_group((get_lambda_tags_by_key('Compact','True',awslambda)['matches']),"aws_lambda_function")
     lambdas.compact()
 
     # Run TF apply; this will destroy all resources that have been imported
     call(['terraform','apply','-auto-approve'])
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("aws_profile")
+    parser.add_argument("aws_region")
+    parser.add_argument("tag_key")
+    parser.add_argument("tag_value")
+    args = parser.parse_args()
+    main(args.aws_profile, args.aws_region, args.tag_key, args.tag_value)
